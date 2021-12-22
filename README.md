@@ -1,11 +1,6 @@
-# pcie_debug
-Command line tool to Read/Write to PCIe BARx memory space
-
-# Links
-
-This tool is derived from D. W. Hawkins (dwh@ovro.caltech.edu). The original
-sources can be found on [altera forum](http://www.alteraforum.com/forum/showthread.php?t=35678).
-
-#program cmd
+# Use Guide
+sudo apt-get install libreadline-dev
+sudo apt-get install libncurses5-dev
+# Compile Command
 gcc pci_debug.c -o pci_debug -lreadline -lcurses
 

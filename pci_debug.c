@@ -192,13 +192,13 @@ int main(int argc, char *argv[])
 	struct stat statbuf;
 	device_t device;
 	device_t *dev = &device;
-	desc_info *desc;
+	desc_info desc[10] = {0};
 	int fd = 0;
 	char attr[1024];
 	unsigned long phys_addr;
-
+	uint32_t cnt = 1;
 	system("setpci -s 1:0.0 4.b=6");
-	system("setpci -s 1:0.0 5.b=4");
+	system("setpci -s 1:0.0 5.b=0");
 	/* Clear desc mem*/
 if ((fd = open("/dev/udmabuf0", O_RDWR)) != -1)
     {
@@ -214,24 +214,70 @@ if ((fd = open("/dev/udmabuf0", O_RDWR)) != -1)
 		printf("phys_addr:0x%lx\n", phys_addr);
         close(fd);
     }
-	memset((void *)(boot_buffer+24), 0xa5, 0x500);
-	memset((void *)(boot_buffer), 0x0, 24);
+	//memset((void *)(boot_buffer+24), 0xa5, 0x500);
+	for(cnt = 0; cnt < 0x500; cnt += 0x4) {
+		*(volatile uint32_t*)(boot_buffer + 0xf0 + cnt) = cnt;
+	}
+	memset((void *)(boot_buffer), 0x0, 0xf0);
 	mem_disp((void *)(boot_buffer), 0x500);
 
-	desc = (desc_info *)(boot_buffer);
-	desc->DAR_Low = 0x0603d000;
-	// desc->DAR_Low = 0x82900000 + 0x18;
-	desc->DAR_High = 0x0;
-	desc->SAR_Low = 0x82900000;
-	// desc->SAR_Low = 0x0603d000;
-	desc->SAR_High = 0x0;
-	desc->Transfer_Size = 128;
-	desc->desc_ctrl.Stop = 1;
-	desc->desc_ctrl.INT = 1;
-	desc->desc_ctrl.LIE = 1;
-	desc->desc_ctrl.RIE = 0;
-	desc->desc_ctrl.LLP = 0;
-	desc->desc_ctrl.OWN = 1;
+	//desc_info desc[10] __attribute__((at(0x82900000))) = {0};
+
+	//desc = (boot_buffer);
+    // desc[0].DAR_Low = 0x0603d000;
+	desc[0].DAR_Low = phys_addr + sizeof(desc);
+	desc[0].DAR_High = 0x0;
+	// desc[0].SAR_Low = phys_addr + 0xf0;//sizeof(desc);
+	desc[0].SAR_Low = 0x0603d000;
+	desc[0].SAR_High = 0x0;
+	desc[0].Transfer_Size = 12;
+	desc[0].desc_ctrl.Stop = 1;
+	desc[0].desc_ctrl.INT = 1;
+	desc[0].desc_ctrl.LIE = 1;
+	desc[0].desc_ctrl.RIE = 0;
+	desc[0].desc_ctrl.LLP = 0;
+	desc[0].desc_ctrl.OWN = 1;
+	
+	desc[1].DAR_Low = phys_addr + sizeof(desc) + 12;
+	desc[1].DAR_High = 0x0;
+	desc[1].SAR_Low = 0x0603d000 + 0x20;
+	desc[1].SAR_High = 0x0;
+	desc[1].Transfer_Size = 12;
+	desc[1].desc_ctrl.Stop = 1;
+	desc[1].desc_ctrl.INT = 1;
+	desc[1].desc_ctrl.LIE = 1;
+	desc[1].desc_ctrl.RIE = 0;
+	desc[1].desc_ctrl.LLP = 0;
+	desc[1].desc_ctrl.OWN = 1;
+
+	// desc[1].SAR_High = phys_addr+0x48;
+	// desc[1].desc_ctrl.LLP = 1;
+
+	desc[2].DAR_Low = phys_addr + sizeof(desc) + 12*2;
+	desc[2].DAR_High = 0x0;
+	desc[2].SAR_Low = 0x0603d000 + 0x20*2;
+	desc[2].SAR_High = 0x0;
+	desc[2].Transfer_Size = 12;
+	desc[2].desc_ctrl.Stop = 1;
+	desc[2].desc_ctrl.INT = 1;
+	desc[2].desc_ctrl.LIE = 1;
+	desc[2].desc_ctrl.RIE = 0;
+	desc[2].desc_ctrl.LLP = 0;
+	desc[2].desc_ctrl.OWN = 1;
+
+	desc[3].DAR_Low = phys_addr + sizeof(desc) + 12*3;
+	desc[3].DAR_High = 0x0;
+	desc[3].SAR_Low = 0x0603d000 + 0x20*3;
+	desc[3].SAR_High = 0x0;
+	desc[3].Transfer_Size = 12;
+	desc[3].desc_ctrl.Stop = 1;
+	desc[3].desc_ctrl.INT = 1;
+	desc[3].desc_ctrl.LIE = 1;
+	desc[3].desc_ctrl.RIE = 0;
+	desc[3].desc_ctrl.LLP = 0;
+	desc[3].desc_ctrl.OWN = 1;
+
+	memcpy((void *)(boot_buffer), desc, sizeof(desc));
 
 	mem_disp((void *)boot_buffer, 256);
 	/* Clear the structure fields */
@@ -379,7 +425,7 @@ parse_command(
 		line = readline("PCI> ");
 		/* Ctrl-D check */
 		if (line == NULL) {
-			printf("\n");
+			printf("\n"); 
 			continue;
 		}
 		/* Empty line check */
@@ -457,6 +503,51 @@ int process_command(device_t *dev, char *cmd)
 		case 'q':
 		case 'Q':
 			mem_disp((void *)(boot_buffer), 0x500);
+			return 1;
+		case 'l':
+		case 'L':
+			system("setpci -s 1:0.0 5.b=0");
+			system("setpci -s 1:0.0 b3.b=0");
+			system("setpci -s 1:0.0 52.b=0:1");
+			printf("legacy int init\n");
+			return 1;
+		case 'x':
+			system("setpci -s 1:0.0 5.b=04"); 	
+			system("setpci -s 1:0.0 b3.b=0");
+			system("setpci -s 1:0.0 52.b=1:1");
+			printf("msi int init\n");
+			return 1;
+		case 'X':
+			system("setpci -s 1:0.0 5.b=04");
+			system("setpci -s 1:0.0 b3.b=80");
+			printf("msix int init\n");
+			return 1;
+		case 'a':
+			printf("bar0 base addr %#x size %#x\n", dev->addr, dev->size);
+			return 1;	
+		case 'i':
+			printf("bar0 aut init dma reg -> bar0\n");
+			system("setpci -s 1:0.0 81c.b=3e:3f");
+			printf("enable AUT\n");
+			sleep(1);
+			write_le32(dev, 0x108, 0xa3000000);
+			write_le32(dev, 0x110, 0xa3010000);
+			write_le32(dev, 0x114, 0x10d80000);
+			write_le32(dev, 0x100, 0x0);
+			write_le32(dev, 0x104, 0x80000000);
+			system("setpci -s 1:0.0 81c.b=3f:3f");
+			sleep(1);
+			printf("disable AUT\n");
+			write_le32(dev, 0x0, 0x0);
+			write_le32(dev, 0x51c, 0x1);
+			printf("dma init done\n");
+			return 1;
+
+		case '1':
+			write_le32(dev, 0xc, 0x1100000);
+			write_le32(dev, 0x14, 0x1100030);
+			write_le32(dev, 0x4, 1);
+			write_le32(dev, 0x8, 1);
 			return 1;
 		default:
 			break;

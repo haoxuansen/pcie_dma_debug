@@ -88,6 +88,7 @@ int change_mem(device_t *dev, char *cmd);
 int fill_mem(device_t *dev, char *cmd);
 int display_mem(device_t *dev, char *cmd);
 int change_endian(device_t *dev, char *cmd);
+void pcie_mem_enable(void);
 
 /* Endian read/write mode */
 static int big_endian = 0;
@@ -183,7 +184,12 @@ void mem_disp(void *mem_addr, uint32_t data_size)
         ptr += column_cnt;
     }
 }
-static void *boot_buffer;
+void *boot_buffer;
+uint32_t ep_addr = 0x0603d000;
+uint32_t rc_addr = 0;
+uint32_t desc_size = 0;
+uint32_t desc_data_size = 0x80;
+desc_info desc[40] = {0};
 int main(int argc, char *argv[])
 {
 	int opt;
@@ -191,18 +197,19 @@ int main(int argc, char *argv[])
 	int status;
 	struct stat statbuf;
 	device_t device;
-	device_t *dev = &device;
-	desc_info desc[10] = {0};
+	device_t *dev = &device;	
 	int fd = 0;
 	char attr[1024];
 	unsigned long phys_addr;
-	uint32_t cnt = 1;
-	system("setpci -s 1:0.0 4.b=6");
-	system("setpci -s 1:0.0 5.b=0");
+	uint32_t cnt = 0;
+	uint32_t data_cnt = 0;
+	// system("setpci -s 1:0.0 4.b=6");
+	// system("setpci -s 1:0.0 5.b=0");
+	pcie_mem_enable();
 	/* Clear desc mem*/
 if ((fd = open("/dev/udmabuf0", O_RDWR)) != -1)
     {
-        boot_buffer = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        boot_buffer = mmap(NULL, 0x3000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         /* Do some read/write access to buf */
         //mem_disp((void *)boot_buffer, 256);f
         close(fd);
@@ -214,72 +221,62 @@ if ((fd = open("/dev/udmabuf0", O_RDWR)) != -1)
 		printf("phys_addr:0x%lx\n", phys_addr);
         close(fd);
     }
-	//memset((void *)(boot_buffer+24), 0xa5, 0x500);
-	for(cnt = 0; cnt < 0x500; cnt += 0x4) {
-		*(volatile uint32_t*)(boot_buffer + 0xf0 + cnt) = cnt;
+	for(cnt = 0; cnt < 0x1900; cnt += 0x4) {
+		*(volatile uint32_t*)(boot_buffer + sizeof(desc) + cnt) = cnt;
 	}
-	memset((void *)(boot_buffer), 0x0, 0xf0);
-	mem_disp((void *)(boot_buffer), 0x500);
+	// for(cnt = 0; cnt < 0x900; cnt += 0x4) {
+	// 	*(volatile uint32_t*)(boot_buffer + 0x900 + sizeof(desc) + cnt) = cnt;
+	// }
 
-	//desc_info desc[10] __attribute__((at(0x82900000))) = {0};
+	memset((void *)(boot_buffer), 0x0, sizeof(desc));
 
-	//desc = (boot_buffer);
-    // desc[0].DAR_Low = 0x0603d000;
-	desc[0].DAR_Low = phys_addr + sizeof(desc);
-	desc[0].DAR_High = 0x0;
-	// desc[0].SAR_Low = phys_addr + 0xf0;//sizeof(desc);
-	desc[0].SAR_Low = 0x0603d000;
-	desc[0].SAR_High = 0x0;
-	desc[0].Transfer_Size = 12;
-	desc[0].desc_ctrl.Stop = 1;
-	desc[0].desc_ctrl.INT = 1;
-	desc[0].desc_ctrl.LIE = 1;
-	desc[0].desc_ctrl.RIE = 0;
-	desc[0].desc_ctrl.LLP = 0;
-	desc[0].desc_ctrl.OWN = 1;
-	
-	desc[1].DAR_Low = phys_addr + sizeof(desc) + 12;
-	desc[1].DAR_High = 0x0;
-	desc[1].SAR_Low = 0x0603d000 + 0x20;
-	desc[1].SAR_High = 0x0;
-	desc[1].Transfer_Size = 12;
-	desc[1].desc_ctrl.Stop = 1;
-	desc[1].desc_ctrl.INT = 1;
-	desc[1].desc_ctrl.LIE = 1;
-	desc[1].desc_ctrl.RIE = 0;
-	desc[1].desc_ctrl.LLP = 0;
-	desc[1].desc_ctrl.OWN = 1;
+	for(desc_size = 0; desc_size < 20; desc_size += 2)
+	{		
+		desc[desc_size].SAR_High = phys_addr+(sizeof(desc[0]) * (desc_size+1) );
+		desc[desc_size].desc_ctrl.LLP = 1;
 
-	// desc[1].SAR_High = phys_addr+0x48;
-	// desc[1].desc_ctrl.LLP = 1;
+		desc[desc_size+1].DAR_Low = ep_addr + (data_cnt * desc_data_size); 
+		// desc[0].DAR_Low = phys_addr + sizeof(desc);
+		desc[desc_size+1].DAR_High = 0x0;
+		desc[desc_size+1].SAR_Low = phys_addr + sizeof(desc) + (data_cnt++ * desc_data_size);
+		// desc[0].SAR_Low = 0x0603d000;
+		desc[desc_size+1].SAR_High = 0x0;
+		desc[desc_size+1].Transfer_Size = desc_data_size;
+		desc[desc_size+1].desc_ctrl.Stop = 0;
+		desc[desc_size+1].desc_ctrl.INT = 0;
+		desc[desc_size+1].desc_ctrl.LIE = 1;
+		desc[desc_size+1].desc_ctrl.RIE = 0;
+		desc[desc_size+1].desc_ctrl.LLP = 0;
+		desc[desc_size+1].desc_ctrl.OWN = 1;		
+	}
+	desc[19].desc_ctrl.INT = 1;
+	desc[19].desc_ctrl.Stop = 1;
 
-	desc[2].DAR_Low = phys_addr + sizeof(desc) + 12*2;
-	desc[2].DAR_High = 0x0;
-	desc[2].SAR_Low = 0x0603d000 + 0x20*2;
-	desc[2].SAR_High = 0x0;
-	desc[2].Transfer_Size = 12;
-	desc[2].desc_ctrl.Stop = 1;
-	desc[2].desc_ctrl.INT = 1;
-	desc[2].desc_ctrl.LIE = 1;
-	desc[2].desc_ctrl.RIE = 0;
-	desc[2].desc_ctrl.LLP = 0;
-	desc[2].desc_ctrl.OWN = 1;
+	for(desc_size = 20, data_cnt = 0; desc_size < 40; desc_size += 2)
+	{		
+		desc[desc_size].SAR_High = phys_addr+(sizeof(desc[0]) * (desc_size+1) );
+		desc[desc_size].desc_ctrl.LLP = 1;
 
-	desc[3].DAR_Low = phys_addr + sizeof(desc) + 12*3;
-	desc[3].DAR_High = 0x0;
-	desc[3].SAR_Low = 0x0603d000 + 0x20*3;
-	desc[3].SAR_High = 0x0;
-	desc[3].Transfer_Size = 12;
-	desc[3].desc_ctrl.Stop = 1;
-	desc[3].desc_ctrl.INT = 1;
-	desc[3].desc_ctrl.LIE = 1;
-	desc[3].desc_ctrl.RIE = 0;
-	desc[3].desc_ctrl.LLP = 0;
-	desc[3].desc_ctrl.OWN = 1;
+		// desc[desc_size+1].DAR_Low = ep_addr + (desc_size * (desc_data_size - 1)); 
+		desc[desc_size+1].DAR_Low = (phys_addr + 0x2000) + (data_cnt * desc_data_size);
+		desc[desc_size+1].DAR_High = 0x0;
+		// desc[desc_size+1].SAR_Low = phys_addr + sizeof(desc) + (desc_size * (desc_data_size - 1));
+		desc[desc_size+1].SAR_Low = ep_addr + (data_cnt++ * desc_data_size);
+		desc[desc_size+1].SAR_High = 0x0;
+		desc[desc_size+1].Transfer_Size = desc_data_size;
+		desc[desc_size+1].desc_ctrl.Stop = 0;
+		desc[desc_size+1].desc_ctrl.INT = 0;
+		desc[desc_size+1].desc_ctrl.LIE = 1;
+		desc[desc_size+1].desc_ctrl.RIE = 0;
+		desc[desc_size+1].desc_ctrl.LLP = 0;
+		desc[desc_size+1].desc_ctrl.OWN = 1;		
+	}
+	desc[39].desc_ctrl.INT = 1;
+	desc[39].desc_ctrl.Stop = 1;
 
 	memcpy((void *)(boot_buffer), desc, sizeof(desc));
+	mem_disp((void *)(boot_buffer), 0x1000);
 
-	mem_disp((void *)boot_buffer, 256);
 	/* Clear the structure fields */
 	memset(dev, 0, sizeof(device_t));
 
@@ -478,7 +475,45 @@ display_help(
 	printf("       addresses are always byte based\n");
 	printf("\n");
 }
-
+void pcie_mem_enable(void)
+{
+	system("setpci -s 1:0.0 4.b=6");
+	system("setpci -s 1:0.0 5.b=0");
+}
+void pcie_link_down(void)
+{
+	system("setpci -s 0:1.0 3e.b=40:40");
+	usleep(50000);
+	system("setpci -s 0:1.0 3e.b=0:40");
+	usleep(50000);
+	pcie_mem_enable();
+	printf("link down pass\n");
+	
+}
+void pcie_speed_change_gen1(void)
+{
+	system("setpci -s 0:1.0 70.b=1");
+	system("setpci -s 0:1.0 50.b=60");			
+}
+void pcie_speed_change_gen2(void)
+{
+	system("setpci -s 0:1.0 70.b=2");
+	system("setpci -s 0:1.0 50.b=60");			
+}
+void desc_speed_reset_mix_case(device_t *dev)
+{
+	uint32_t i = 0;
+	write_le32(dev, 0x2c, 0x1100000);
+	write_le32(dev, 0x24, 10);
+	sleep(1);
+	write_le32(dev, 0x14, 0x11001e0);
+	write_le32(dev, 0xc, 10);
+	sleep(2);
+	i = memcmp((boot_buffer + sizeof(desc)), (boot_buffer + 0x2000), desc_data_size * 10);
+	if(0 == i) {
+		printf("desc pass \n");
+	}	
+}
 int process_command(device_t *dev, char *cmd)
 {
 	if (cmd[0] == '\0') {
@@ -502,7 +537,7 @@ int process_command(device_t *dev, char *cmd)
 			return fill_mem(dev, cmd);
 		case 'q':
 		case 'Q':
-			mem_disp((void *)(boot_buffer), 0x500);
+			mem_disp((void *)(boot_buffer+0x2000), 0x500);
 			return 1;
 		case 'l':
 		case 'L':
@@ -523,31 +558,55 @@ int process_command(device_t *dev, char *cmd)
 			printf("msix int init\n");
 			return 1;
 		case 'a':
-			printf("bar0 base addr %#x size %#x\n", dev->addr, dev->size);
+			//printf("bar0 base addr %#x size %#x\n", dev->addr, dev->size);
 			return 1;	
 		case 'i':
 			printf("bar0 aut init dma reg -> bar0\n");
-			system("setpci -s 1:0.0 81c.b=3e:3f");
+			system("setpci -s 1:0.0 81c.b=0:1");
+			usleep(50);
+			system("setpci -s 1:0.0 81c.b=0:1");
 			printf("enable AUT\n");
-			sleep(1);
+			usleep(1000);
 			write_le32(dev, 0x108, 0xa3000000);
 			write_le32(dev, 0x110, 0xa3010000);
 			write_le32(dev, 0x114, 0x10d80000);
 			write_le32(dev, 0x100, 0x0);
 			write_le32(dev, 0x104, 0x80000000);
-			system("setpci -s 1:0.0 81c.b=3f:3f");
-			sleep(1);
+
+			printf("inbound base addr: %#x\n", read_le32(dev, 0x108));
+			printf("inbound limit addr: %#x\n", read_le32(dev, 0x110));
+			printf("inbound target addr: %#x\n", read_le32(dev, 0x114));
+			printf("inbound ctrl 1: %#x\n", read_le32(dev, 0x0));
+			printf("inbound ctrl 2: %#x\n", read_le32(dev, 0x104));
+
+			usleep(1000);
+			system("setpci -s 1:0.0 81c.b=1:1");
+			usleep(50);
+			system("setpci -s 1:0.0 81c.b=1:1");
+			usleep(1000);
 			printf("disable AUT\n");
 			write_le32(dev, 0x0, 0x0);
-			write_le32(dev, 0x51c, 0x1);
+			write_le32(dev, 0x520, 0x1);
 			printf("dma init done\n");
 			return 1;
 
-		case '1':
+		case '1':	//pre-fetch
 			write_le32(dev, 0xc, 0x1100000);
 			write_le32(dev, 0x14, 0x1100030);
 			write_le32(dev, 0x4, 1);
 			write_le32(dev, 0x8, 1);
+			return 1;
+
+		case '2':
+			while(1){
+				pcie_speed_change_gen1();
+				desc_speed_reset_mix_case(dev);
+				pcie_speed_change_gen2();
+				desc_speed_reset_mix_case(dev);
+				pcie_link_down();
+			}
+			return 1;
+		case '4':
 			return 1;
 		default:
 			break;
@@ -886,6 +945,7 @@ write_le32(
 	unsigned int   addr,
 	unsigned int data)
 {
+	usleep(1);
 	if (__BYTE_ORDER != __LITTLE_ENDIAN) {
 		data = bswap_32(data);
 	}

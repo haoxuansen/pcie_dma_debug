@@ -186,10 +186,13 @@ void mem_disp(void *mem_addr, uint32_t data_size)
 }
 void *boot_buffer;
 uint32_t ep_addr = 0x0603d000;
+// uint32_t ep_addr = 0x20000000;
 uint32_t rc_addr = 0;
 uint32_t desc_size = 0;
-uint32_t desc_data_size = 0x80;
+uint32_t desc_data_size = 4;
 desc_info desc[40] = {0};
+uint32_t data_cnt = 0;
+unsigned long phys_addr;
 int main(int argc, char *argv[])
 {
 	int opt;
@@ -200,16 +203,14 @@ int main(int argc, char *argv[])
 	device_t *dev = &device;	
 	int fd = 0;
 	char attr[1024];
-	unsigned long phys_addr;
 	uint32_t cnt = 0;
-	uint32_t data_cnt = 0;
 	// system("setpci -s 1:0.0 4.b=6");
 	// system("setpci -s 1:0.0 5.b=0");
 	pcie_mem_enable();
 	/* Clear desc mem*/
 if ((fd = open("/dev/udmabuf0", O_RDWR)) != -1)
     {
-        boot_buffer = mmap(NULL, 0x3000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        boot_buffer = mmap(NULL, 0x100000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         /* Do some read/write access to buf */
         //mem_disp((void *)boot_buffer, 256);f
         close(fd);
@@ -503,16 +504,46 @@ void pcie_speed_change_gen2(void)
 void desc_speed_reset_mix_case(device_t *dev)
 {
 	uint32_t i = 0;
-	write_le32(dev, 0x2c, 0x1100000);
-	write_le32(dev, 0x24, 10);
-	sleep(1);
-	write_le32(dev, 0x14, 0x11001e0);
-	write_le32(dev, 0xc, 10);
-	sleep(2);
+	write_le32(dev, 0x34, 0x1100000);
+	write_le32(dev, 0x2c, 10);
+	while(0x40 == (read_le32(dev, 0x44) & 0x40));
+
+	write_le32(dev, 0x1c, 0x11001e0);
+	write_le32(dev, 0x14, 10);
+	while(0x10 == (read_le32(dev, 0x44) & 0x10));
+
 	i = memcmp((boot_buffer + sizeof(desc)), (boot_buffer + 0x2000), desc_data_size * 10);
 	if(0 == i) {
 		printf("desc pass \n");
+	} else {
+		mem_disp((void *)(boot_buffer+0x2000), desc_data_size * 10);
+		mem_disp((void *)(boot_buffer+sizeof(desc)), desc_data_size * 10);
+		//access(0,0);
 	}	
+	desc_data_size += 4;
+	if(desc_data_size > 128) {
+		desc_data_size = 4;
+	}
+	for(desc_size = 0, data_cnt = 0; desc_size < 20; desc_size += 2)
+	{		
+		desc[desc_size+1].Transfer_Size = desc_data_size;
+		desc[desc_size+1].DAR_Low = ep_addr + (data_cnt * desc_data_size); 			
+		desc[desc_size+1].SAR_Low = phys_addr + sizeof(desc) + (data_cnt++ * desc_data_size);				
+	}
+
+	for(desc_size = 20, data_cnt = 0; desc_size < 40; desc_size += 2)
+	{		
+		desc[desc_size+1].Transfer_Size = desc_data_size;
+		desc[desc_size+1].DAR_Low = (phys_addr + 0x2000) + (data_cnt * desc_data_size);
+		desc[desc_size+1].SAR_Low = ep_addr + (data_cnt++ * desc_data_size);
+	}
+	memset((boot_buffer), 0, sizeof(desc));
+	memcpy((void *)(boot_buffer), desc, sizeof(desc));
+	printf("desc size : %#x\n", desc_data_size);
+	//mem_disp((void *)(boot_buffer), sizeof(desc));
+
+	memset((boot_buffer + 0x2000), 0, desc_data_size);
+
 }
 int process_command(device_t *dev, char *cmd)
 {
@@ -538,9 +569,10 @@ int process_command(device_t *dev, char *cmd)
 		case 'q':
 		case 'Q':
 			mem_disp((void *)(boot_buffer+0x2000), 0x500);
+			mem_disp((void *)(boot_buffer), 0x500);
 			return 1;
 		case 'l':
-		case 'L':
+		case 'L': 
 			system("setpci -s 1:0.0 5.b=0");
 			system("setpci -s 1:0.0 b3.b=0");
 			system("setpci -s 1:0.0 52.b=0:1");
@@ -586,7 +618,7 @@ int process_command(device_t *dev, char *cmd)
 			usleep(1000);
 			printf("disable AUT\n");
 			write_le32(dev, 0x0, 0x0);
-			write_le32(dev, 0x520, 0x1);
+			write_le32(dev, 0x8, 0x1);
 			printf("dma init done\n");
 			return 1;
 
@@ -599,11 +631,11 @@ int process_command(device_t *dev, char *cmd)
 
 		case '2':
 			while(1){
-				pcie_speed_change_gen1();
+				pcie_speed_change_gen1();				
 				desc_speed_reset_mix_case(dev);
 				pcie_speed_change_gen2();
 				desc_speed_reset_mix_case(dev);
-				pcie_link_down();
+				//pcie_link_down();
 			}
 			return 1;
 		case '4':
